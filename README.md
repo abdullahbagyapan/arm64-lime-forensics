@@ -9,7 +9,7 @@ Because this toolkit relies entirely on the Python standard library, there is no
 **1. Clone the repository:**
 ```bash
 git clone github.com/abdullahbagyapan/arm64-lime-forensics.git
-cd arm64-lime-forensics
+cd arm64-lime-forensics/arm64-lime
 ```
 
 ## Acquisition

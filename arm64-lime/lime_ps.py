@@ -171,11 +171,23 @@ def build_parser() -> argparse.ArgumentParser:
     maps_cmd = commands.add_parser("maps", help="List a PID's virtual memory areas")
     maps_cmd.add_argument("--pid", required=True, type=_number)
 
-    read_cmd = commands.add_parser("read", help="Read bytes at a process virtual address")
+    read_cmd = commands.add_parser(
+        "read",
+        help="Read bytes at a process virtual address",
+    )
     read_cmd.add_argument("--pid", required=True, type=_number)
     read_cmd.add_argument("--address", required=True, type=_number)
+    read_cmd.add_argument(
+        "--offset",
+        type=_number,
+        default=0,
+        help="Additional byte offset from --address (default: 0)",
+    )
     read_cmd.add_argument("--size", required=True, type=_number)
-    read_cmd.add_argument("--output", help="Write raw bytes to this file; otherwise print hex")
+    read_cmd.add_argument(
+        "--output",
+        help="Write raw bytes to this file; otherwise print hex",
+    )
 
     region_cmd = commands.add_parser("read-region", help="Read a bounded slice of a listed VMA")
     region_cmd.add_argument("--pid", required=True, type=_number)
@@ -190,6 +202,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command in {"read", "read-region"}:
+        if args.offset < 0:
+            parser.error("--offset must be non-negative")
         if args.size < 0:
             parser.error("--size must be non-negative")
         if args.size > 64 * 1024 * 1024:
@@ -275,12 +289,15 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             
             if args.command == "read":
+                read_address = args.address + args.offset
+
                 data = processes.read_process_memory(
                     args.pid,
-                    args.address,
+                    read_address,
                     args.size,
                 )
-                display_address = args.address
+
+                display_address = read_address
 
             else:
                 regions = processes.list_memory_regions(args.pid)

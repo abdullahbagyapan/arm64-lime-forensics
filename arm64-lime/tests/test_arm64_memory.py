@@ -106,11 +106,40 @@ class ARM64TranslationTests(unittest.TestCase):
             kernel_pgd_paddr=0x1000,
         )
 
+    def test_physical_address_to_pfn(self):
+        result = self.memory.translate(0x400123, pgd_paddr=0x1000)
+
+        page_shift = self.memory.geometry.page_shift
+
+        pfn = (result.physical_address >> page_shift)
+
+        self.assertEqual(page_shift, 12)
+        self.assertEqual(pfn, 0x9)
+
     def test_translate_user_page(self):
         result = self.memory.translate(0x400123, pgd_paddr=0x1000)
+
         self.assertEqual(result.physical_address, 0x9123)
         self.assertEqual(result.mapping_size, 4096)
+        self.assertEqual(result.level, 3)
         self.assertFalse(result.is_block)
+
+    def test_translation_result_metadata(self):
+        result = self.memory.translate(0x400123, pgd_paddr=0x1000)
+
+        self.assertEqual(result.virtual_address, 0x400123)
+
+        self.assertEqual(result.physical_address, 0x9123)
+
+        self.assertEqual(result.mapping_size, 4096)
+
+        self.assertEqual(result.level, 3)
+
+        self.assertFalse(result.is_block)
+
+        self.assertEqual(result.table_paddr, 0x3000)
+
+        self.assertEqual(result.descriptor_paddr, 0x3000)
 
     def test_read_crossing_virtual_page_boundary(self):
         actual = self.memory.read_virtual(
@@ -162,9 +191,67 @@ class ARM64TranslationTests(unittest.TestCase):
             kernel_pgd_paddr=0x1000,
         )
         result = memory.translate(0x40001234, pgd_paddr=0x1000)
+        self.assertEqual(result.level, 1)
         self.assertEqual(result.physical_address, 0x40001234)
         self.assertTrue(result.is_block)
         self.assertEqual(result.mapping_size, 1 << 30)
+
+    def test_level_2_block_mapping(self):
+        lime = FakeLime()
+
+        # L1 table -> L2 table.
+        lime.write_u64(0x1000, 0x2000 | 0b11)
+
+        # VA 0x00200000 uses L2 index 1.
+        # Map it to PA 0x02000000 using an L2 block.
+        lime.write_u64(0x2000 + 1 * 8, 0x02000000 | 0b01)
+
+        memory = ARM64Memory(
+            FakeProfile(),
+            lime,
+            kernel_pgd_paddr=0x1000,
+        )
+
+        result = memory.translate(0x00201234, pgd_paddr=0x1000)
+
+        self.assertEqual(result.physical_address,0x02001234)
+        self.assertEqual(result.level, 2)
+        self.assertEqual(result.mapping_size, 2 * 1024 * 1024)
+        self.assertTrue(result.is_block)
+
+    def test_level_2_block_pfn(self):
+        lime = FakeLime()
+
+        lime.write_u64(0x1000, 0x2000 | 0b11)
+
+        lime.write_u64(0x2000 + 1 * 8, 0x02000000 | 0b01)
+
+        memory = ARM64Memory(
+            FakeProfile(),
+            lime,
+            kernel_pgd_paddr=0x1000,
+        )
+
+        result = memory.translate(0x00201234, pgd_paddr=0x1000)
+
+        self.assertEqual(result.physical_address >> 12, 0x2001)
+
+    def test_level_2_block_preserves_offset(self):
+        lime = FakeLime()
+
+        lime.write_u64(0x1000, 0x2000 | 0b11)
+
+        lime.write_u64(0x2000 + 1 * 8, 0x02000000 | 0b01)
+
+        memory = ARM64Memory(
+            FakeProfile(),
+            lime,
+            kernel_pgd_paddr=0x1000,
+        )
+
+        result = memory.translate(0x002ABCDE, pgd_paddr=0x1000)
+
+        self.assertEqual(result.physical_address, 0x020ABCDE)
 
     def test_page_walks_for_all_supported_granules(self):
         for page_size, va_bits in (

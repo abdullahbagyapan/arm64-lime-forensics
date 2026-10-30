@@ -189,19 +189,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write raw bytes to this file; otherwise print hex",
     )
 
-    region_cmd = commands.add_parser("read-region", help="Read a bounded slice of a listed VMA")
-    region_cmd.add_argument("--pid", required=True, type=_number)
-    region_cmd.add_argument("--index", required=True, type=_number, help="Zero-based row index from the PID's maps output")
-    region_cmd.add_argument("--offset", type=_number, default=0, help="Offset from the region start")
-    region_cmd.add_argument("--size", type=_number, required=True, help="Number of bytes to read")
-    region_cmd.add_argument("--output", help="Write raw bytes to this file; otherwise print hex")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.command in {"read", "read-region"}:
+    if args.command == "read":
         if args.offset < 0:
             parser.error("--offset must be non-negative")
         if args.size < 0:

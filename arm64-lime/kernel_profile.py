@@ -112,7 +112,7 @@ class KernelProfile:
                 f"expected {self.FORMAT!r}"
             )
 
-        if version not in self.SUPPORTED_VERSIONS:
+        if (not isinstance(version, int) or isinstance(version, bool) or version not in self.SUPPORTED_VERSIONS):
             raise KernelProfileFormatError(
                 f"Unsupported profile version: {version!r}; "
                 f"supported versions: {sorted(self.SUPPORTED_VERSIONS)}"

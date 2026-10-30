@@ -323,14 +323,14 @@ class ProcessEnumerator:
 
             if parent_address:
                 try:
-                    pid_field = self._offset(
+                    tgid_field = self._offset(
                         "task_struct",
-                        "pid",
+                        "tgid",
                     )
 
                     parent_pid = self._read_sint(
                         parent_address
-                        + int(pid_field),
+                        + int(tgid_field),
                         self.INT_SIZE,
                     )
 

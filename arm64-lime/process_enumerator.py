@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterator, Optional
 
-from arm64_memory import ARM64Memory, ARM64MemoryError
+from arm64_memory import ARM64Memory, ARM64MemoryError, TranslationResult
 from kernel_profile import KernelProfile, KernelProfileError
 
 
@@ -556,6 +556,24 @@ class ProcessEnumerator:
         ] = result
 
         return result
+
+    def translate_process_address(
+        self,
+        pid: int,
+        address: int,
+    ) -> TranslationResult:
+        """Translate a process virtual address using its own page tables."""
+        pgd_paddr = self.process_pgd_paddr(pid)
+
+        try:
+            return self.memory.translate(
+                address,
+                pgd_paddr=pgd_paddr,
+            )
+        except (ARM64MemoryError, ValueError) as exc:
+            raise ProcessEnumerationError(
+                f"Cannot translate PID {pid} VA 0x{address:x}: {exc}"
+            ) from exc
 
     def read_process_memory(
         self,

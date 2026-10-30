@@ -139,6 +139,72 @@ def _print_hexdump(
             f"{hex_part}  |{ascii_part}|"
         )
 
+def _print_physical_mappings(
+    processes: ProcessEnumerator,
+    pid: int,
+    address: int,
+    size: int,
+) -> None:
+    """Display physical mappings and PFNs for a process memory read."""
+    if size == 0:
+        return
+
+    page_shift = processes.memory.geometry.page_shift
+
+    cursor = address
+    remaining = size
+
+    print("\nPhysical memory mappings:")
+
+    while remaining:
+        try:
+            result = processes.translate_process_address(
+                pid,
+                cursor,
+            )
+        except ProcessEnumerationError as exc:
+            print(
+                f"  VA 0x{cursor:x}: translation unavailable: {exc}"
+            )
+            return
+
+        pa = result.physical_address
+
+        # Do not cross the current page or block mapping boundary.
+        offset_in_mapping = pa & (result.mapping_size - 1)
+
+        chunk_size = min(
+            remaining,
+            result.mapping_size - offset_in_mapping,
+        )
+
+        pa_end = pa + chunk_size - 1
+
+        first_pfn = pa >> page_shift
+        last_pfn = pa_end >> page_shift
+
+        mapping_type = "block" if result.is_block else "page"
+
+        captured = processes.memory.lime.contains_phys(
+            pa,
+            chunk_size,
+        )
+
+        print(
+            f"  VA: 0x{cursor:016x}-0x{cursor + chunk_size:016x}\n"
+            f"  PA: 0x{pa:016x}-0x{pa_end:016x}\n"
+            f"  PFN: 0x{first_pfn:x}-0x{last_pfn:x}\n"
+            f"  Mapping: {mapping_type}, "
+            f"level {result.level}, "
+            f"{result.mapping_size} bytes\n"
+            f"  Captured: {'yes' if captured else 'no'}"
+        )
+
+        print()
+
+        cursor += chunk_size
+        remaining -= chunk_size
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", required=True, help="Directory containing profile.json and raw artifacts")
@@ -291,6 +357,12 @@ def main(argv: list[str] | None = None) -> int:
 
                 display_address = read_address
 
+                _print_physical_mappings(
+                    processes,
+                    args.pid,
+                    read_address,
+                    len(data),
+                )
             else:
                 regions = processes.list_memory_regions(args.pid)
 

@@ -96,6 +96,8 @@ class ProcessEnumerator:
     _MAPLE_NODE_TYPE_SHIFT = 3
     _MAPLE_ENODE_NULL = 0x04
 
+    _MAPLE_MAX_INDEX = (1 << 64) - 1
+
     _MAPLE_DENSE = 0
     _MAPLE_LEAF_64 = 1
     _MAPLE_RANGE_64 = 2
@@ -868,6 +870,14 @@ class ProcessEnumerator:
             - layout["range_slot"]
         ) // 8
 
+        if (
+            layout["range_pivot_count"] + 1
+            != layout["range_slot_count"]
+        ):
+            raise UnsupportedVmaLayout(
+                "Maple range64 pivot/slot count is inconsistent"
+            )
+
         # --------------------------------------------------------------
         # maple_arange_64
         # --------------------------------------------------------------
@@ -933,6 +943,15 @@ class ProcessEnumerator:
             layout["arange_meta"]
             - layout["arange_gap"]
         ) // 8
+
+        if (
+            layout["arange_pivot_count"] + 1
+            != layout["arange_slot_count"]
+        ):
+            raise UnsupportedVmaLayout(
+                "Maple arange64 pivot/slot count is inconsistent"
+            )
+
 
         # Dense node slots occupy the remainder of struct maple_node
         # starting at maple_node.slot.
@@ -1037,21 +1056,27 @@ class ProcessEnumerator:
         self,
         node_address: int,
         layout: dict[str, int],
+        *,
+        node_max: int,
     ) -> int:
-        """Return active slots in a Maple range node."""
+        """Return active slots in a Maple leaf/range node.
+        
+        Follows the Linux ma_data_end() logic.
+        """
         base = (
             node_address
             + layout["node_mr64"]
         )
 
+        last_pivot_index = (
+           layout["range_pivot_count"] - 1
+        )
+
+
         last_pivot_address = (
             base
             + layout["range_pivot"]
-            + (
-                layout["range_pivot_count"]
-                - 1
-            )
-            * 8
+            + last_pivot_index * 8
         )
 
         last_pivot = self._read_uint(
@@ -1059,36 +1084,83 @@ class ProcessEnumerator:
             8,
         )
 
-        # For regular range nodes, a non-zero final pivot
-        # denotes a full node whose metadata overlays the
-        # otherwise-final slot.
-        if last_pivot != 0:
-            return layout[
-                "range_slot_count"
-            ]
-
-        end_address = (
-            base
-            + layout["range_meta"]
-            + layout["meta_end"]
-        )
-
-        end_index = self._read_uint(
-            end_address,
-            1,
-        )
-
-        if (
-            end_index
-            >= layout["range_slot_count"] - 1
-        ):
-            raise CorruptKernelList(
-                "Invalid Maple Tree "
-                f"metadata.end={end_index} "
-                f"at node 0x{node_address:x}"
+        if last_pivot == 0:
+            end_address = (
+                base
+                + layout["range_meta"]
+                + layout["meta_end"]
             )
 
+            end_index = self._read_uint(
+                end_address,
+                1,
+            )
+
+            if end_index >= layout["range_slot_count"] - 1:
+                raise CorruptKernelList(
+                    "Invalid Maple Tree "
+                    f"metadata.end={end_index} "
+                    f"at node 0x{node_address:x}"
+                )
+
+        elif last_pivot > node_max:
+            raise CorruptKernelList(
+                "Maple Tree final pivot exceeds "
+                f"node maximum at 0x{node_address:x}: "
+                f"pivot=0x{last_pivot:x}, "
+                f"maximum=0x{node_max:x}"
+            )
+
+        elif last_pivot == node_max:
+            end_index = last_pivot_index
+
+        else:
+            end_index = layout["range_slot_count"] - 1
+
         return end_index + 1
+
+    def _maple_child_max(
+        self,
+        node_address: int,
+        node_type: int,
+        slot_index: int,
+        node_max: int,
+        layout: dict[str, int],
+    ) -> int:
+        """Return the maximum index covered by a child node."""
+        if node_type == layout["type_range_64"]:
+            base = node_address + layout["node_mr64"]
+            pivot_offset = layout["range_pivot"]
+            pivot_count = layout["range_pivot_count"]
+
+        elif node_type == layout["type_arange_64"]:
+            base = node_address + layout["node_ma64"]
+            pivot_offset = layout["arange_pivot"]
+            pivot_count = layout["arange_pivot_count"]
+
+        else:
+            raise CorruptKernelList(
+                f"Cannot determine child range for "
+                f"Maple node type {node_type}"
+            )
+
+        if slot_index >= pivot_count:
+            return node_max
+
+        child_max = self._read_uint(
+            base + pivot_offset + slot_index * 8,
+            8,
+        )
+
+        if child_max > node_max:
+            raise CorruptKernelList(
+                "Maple Tree child pivot exceeds parent maximum: "
+                f"child=0x{child_max:x}, "
+                f"parent=0x{node_max:x}"
+            )
+
+        return child_max
+
 
     def _maple_active_arange_slots(
         self,
@@ -1154,9 +1226,9 @@ class ProcessEnumerator:
         seen_vmas: set[int] = set()
         seen_nodes: set[int] = set()
 
-        # (node_address, node_type, depth)
+        # (node_address, node_type, depth, node_max)
         stack: list[
-            tuple[int, int, int]
+            tuple[int, int, int, int]
         ] = []
 
         # A root node carries MAPLE_ROOT_NODE in its low bits.
@@ -1187,6 +1259,7 @@ class ProcessEnumerator:
                     root_address,
                     root_type,
                     0,
+                    self._MAPLE_MAX_INDEX,
                 )
             )
 
@@ -1216,6 +1289,7 @@ class ProcessEnumerator:
                 node_address,
                 node_type,
                 depth,
+                node_max,
             ) = stack.pop()
 
             if depth > 32:
@@ -1259,34 +1333,24 @@ class ProcessEnumerator:
                     f"at 0x{node_address:x}"
                 )
 
-            if (
-                node_type
-                == layout["type_dense"]
-            ):
+            if node_type == layout["type_dense"]:
                 slot_base = (
                     node_address
                     + layout["node_slot"]
                 )
 
-                slot_count = layout[
-                    "dense_slot_count"
-                ]
+                slot_count = layout["dense_slot_count"]
 
-            elif (
-                node_type
-                == layout["type_arange_64"]
-            ):
+            elif node_type == layout["type_arange_64"]:
                 slot_base = (
                     node_address
                     + layout["node_ma64"]
                     + layout["arange_slot"]
                 )
 
-                slot_count = (
-                    self._maple_active_arange_slots(
-                        node_address,
-                        layout,
-                    )
+                slot_count = self._maple_active_arange_slots(
+                    node_address,
+                    layout,
                 )
 
             else:
@@ -1296,11 +1360,10 @@ class ProcessEnumerator:
                     + layout["range_slot"]
                 )
 
-                slot_count = (
-                    self._maple_active_range_slots(
-                        node_address,
-                        layout,
-                    )
+                slot_count = self._maple_active_range_slots(
+                    node_address,
+                    layout,
+                    node_max=node_max,
                 )
 
             # Dense and leaf_64 nodes contain VMA pointers.
@@ -1407,11 +1470,21 @@ class ProcessEnumerator:
                         f"pointer 0x{entry:x}"
                     )
 
+                child_max = self._maple_child_max(
+                    node_address,
+                    node_type,
+                    slot_index,
+                    node_max,
+                    layout,
+                )
+
+
                 stack.append(
                     (
                         child_address,
                         child_type,
                         depth + 1,
+                        child_max,
                     )
                 )
 

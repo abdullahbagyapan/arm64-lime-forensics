@@ -87,7 +87,7 @@ class KernelProfile:
         self._member_cache: dict[tuple[str, str], dict[str, Any]] = {}
         self._source_info_cache: dict[str, dict[str, Any]] = {}
 
-        if require_valid and self.validation_status == "invalid":
+        if require_valid and self.validation_status != "valid":
             issues = "; ".join(
                 f"{item.get('code')}: {item.get('message')}"
                 for item in self.validation_issues

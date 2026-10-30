@@ -139,6 +139,136 @@ def _print_hexdump(
             f"{hex_part}  |{ascii_part}|"
         )
 
+def _print_block_mappings(
+    processes: ProcessEnumerator,
+    pid: int,
+    regions: list[MemoryRegion],
+) -> None:
+    """List ARM64 Level 1 and Level 2 block mappings in process VMAs."""
+
+    memory = processes.memory
+    geometry = memory.geometry
+    page_shift = geometry.page_shift
+
+    # Use the Level 2 mapping size as the scan interval.
+    # Level 1 blocks are larger and will also be detected.
+    scan_step = None
+
+    for target_level in (2, 1):
+        depth = target_level - geometry.start_level
+
+        if 0 <= depth < geometry.levels - 1:
+            scan_step = 1 << geometry.level_shift(depth)
+            break
+
+    if scan_step is None:
+        print("\nThis translation geometry has no supported L1/L2 block level.")
+        return
+
+    print("\nARM64 block mappings (Level 1 and Level 2):")
+    print(f"Scan interval: {scan_step} bytes\n")
+
+    print(
+        f"{'LEVEL':>5} "
+        f"{'VIRTUAL RANGE':>43} "
+        f"{'PHYSICAL RANGE':>43} "
+        f"{'PFN RANGE':>25} "
+        f"{'SIZE':>14} "
+        f"{'CAPTURED':>10}"
+    )
+
+    seen: set[tuple[int, int, int, int]] = set()
+    total = 0
+
+    for region in regions:
+        cursor = region.start
+
+        while cursor < region.end:
+            try:
+                result = processes.translate_process_address(
+                    pid,
+                    cursor,
+                )
+
+            except ProcessEnumerationError:
+                # No block mapping can cover this address.
+                # Continue at the next Level 2 boundary.
+                cursor = min(
+                    region.end,
+                    ((cursor // scan_step) + 1) * scan_step,
+                )
+                continue
+
+            if (
+                not result.is_block
+                or result.level not in (1, 2)
+            ):
+                cursor = min(
+                    region.end,
+                    ((cursor // scan_step) + 1) * scan_step,
+                )
+                continue
+
+            mapping_size = result.mapping_size
+
+            # Recover the beginning of the complete mapping.
+            virtual_base = cursor & ~(mapping_size - 1)
+
+            physical_base = (
+                result.physical_address
+                - (cursor - virtual_base)
+            )
+
+            # Restrict displayed ranges to the current VMA.
+            va_start = max(region.start, virtual_base)
+            va_end = min(
+                region.end,
+                virtual_base + mapping_size,
+            )
+
+            pa_start = physical_base + (va_start - virtual_base)
+            pa_end = physical_base + (va_end - virtual_base)
+
+            key = (
+                result.level,
+                virtual_base,
+                physical_base,
+                mapping_size,
+            )
+
+            if key not in seen:
+                seen.add(key)
+
+                first_pfn = pa_start >> page_shift
+                last_pfn = (pa_end - 1) >> page_shift
+
+                captured = memory.lime.contains_phys(
+                    pa_start,
+                    pa_end - pa_start,
+                )
+
+                print(
+                    f"L{result.level:>4} "
+                    f"0x{va_start:016x}-0x{va_end:016x} "
+                    f"0x{pa_start:016x}-0x{pa_end:016x} "
+                    f"0x{first_pfn:x}-0x{last_pfn:x} "
+                    f"{mapping_size:14,d} "
+                    f"{'yes' if captured else 'no':>10}"
+                )
+
+                total += 1
+
+            # Skip the remainder of this block mapping.
+            cursor = min(
+                region.end,
+                virtual_base + mapping_size,
+            )
+
+    if total == 0:
+        print("No Level 1 or Level 2 block mappings found.")
+
+    print(f"\n{total} block mapping(s) found")
+
 def _print_physical_mappings(
     processes: ProcessEnumerator,
     pid: int,
@@ -234,8 +364,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum number of matches to display (default: 20)",
     )
 
-    maps_cmd = commands.add_parser("maps", help="List a PID's virtual memory areas")
+    maps_cmd = commands.add_parser(
+        "maps",
+        help="List a PID's virtual memory areas",
+    )
+
     maps_cmd.add_argument("--pid", required=True, type=_number)
+
+    maps_cmd.add_argument(
+        "--blocks",
+        action="store_true",
+        help="Display ARM64 Level 1 and Level 2 block mappings",
+    )
 
     read_cmd = commands.add_parser(
         "read",
@@ -290,8 +430,24 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             if args.command == "maps":
                 process = processes.find_process(args.pid)
-                print(f"PID {process.pid} ({process.comm}); task=0x{process.task_address:x}; mm=0x{process.mm_address:x}")
-                _print_regions(processes.list_memory_regions(args.pid))
+
+                print(
+                    f"PID {process.pid} ({process.comm}); "
+                    f"task=0x{process.task_address:x}; "
+                    f"mm=0x{process.mm_address:x}"
+                )
+
+                regions = processes.list_memory_regions(args.pid)
+
+                _print_regions(regions)
+
+                if args.blocks:
+                    _print_block_mappings(
+                        processes,
+                        args.pid,
+                        regions,
+                    )
+
                 return 0
 
             if args.command == "find":

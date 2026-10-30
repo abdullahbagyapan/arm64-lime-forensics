@@ -113,6 +113,25 @@ class LimeReaderTests(unittest.TestCase):
         with self.assertRaises(LimeReaderError):
             reader.read_phys(0x1000, 1)
 
+    def test_read_last_byte_of_range(self):
+        path = self.create_dump(make_range("<", 0x1000, b"abcd"))
+
+        with LimeReader(path) as reader:
+            self.assertEqual(reader.read_phys(0x1003, 1,), b"d")
+
+    def test_zero_size_span_is_contained(self):
+        path = self.create_dump(make_range("<", 0x1000, b"abcd"))
+
+        with LimeReader(path) as reader:
+            self.assertTrue(reader.contains_phys(0xDEADBEEF, 0))
+
+    def test_negative_physical_address_rejected(self):
+        path = self.create_dump(make_range("<", 0x1000, b"abcd"))
+
+        with LimeReader(path) as reader:
+            with self.assertRaises(ValueError):
+                reader.read_phys(-1, 1)
+
     def test_deterministic_random_reads_match_source_payload(self):
         rng = random.Random(20261029)
         physical_start = 0x10000

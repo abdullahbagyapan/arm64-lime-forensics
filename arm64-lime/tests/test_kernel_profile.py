@@ -95,6 +95,7 @@ class KernelProfileTests(unittest.TestCase):
         with self.assertRaises(KernelProfileFormatError):
             self.open_profile(sample_profile(True))
 
+
     def test_symbol_runtime_resolution_uses_runtime_symbol(self):
         profile = self.open_profile(sample_profile())
         self.assertEqual(

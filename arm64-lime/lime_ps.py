@@ -170,13 +170,12 @@ def _print_block_mappings(
 
     print(
         f"{'LEVEL':>5} "
-        f"{'VIRTUAL RANGE':>43} "
-        f"{'PHYSICAL RANGE':>43} "
-        f"{'PFN RANGE':>25} "
-        f"{'SIZE':>14} "
-        f"{'CAPTURED':>10}"
+        f"{'VIRTUAL RANGE':<37} "
+        f"{'PHYSICAL RANGE':<37} "
+        f"{'PFN RANGE':>9} "
+        f"{'SIZE':>17} "
+        f"{'CAPTURED':>20}"
     )
-
     seen: set[tuple[int, int, int, int]] = set()
     total = 0
 

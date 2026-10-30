@@ -267,8 +267,6 @@ def main(argv: list[str] | None = None) -> int:
                         )
                         print(f"  Offset       : 0x{offset:x} ({offset})")
                         print(f"  Match VA     : 0x{address:016x}")
-                        print(f"  Sequence VA  : 0x{address + 0x10:016x}")
-                        print(f"  Value VA     : 0x{address + 0x18:016x}")
                         print()
 
                         total += 1

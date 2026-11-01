@@ -138,4 +138,4 @@ For ARM64 kernel-image VA-to-PA conversion, `kimage_voffset` is taken from VMCOR
 - **Physical-memory holes:** Reads that cross uncaptured physical ranges fail explicitly; missing bytes are not zero-filled.
 - **Read boundaries:** The CLI `read` command reads from a supplied process virtual address and does not restrict the request to a VMA. Use `maps` to inspect VMA boundaries before selecting an address range.
 
-See [methodology.md](methodology.md) for the analysis assumptions and [architecture.md](architecture.md) for module responsibilities and traversal details.
+See [METHODOLOGY.md](METHODOLOGY.md) for the analysis assumptions and [ARCHITECTURE.md](ARCHITECTURE.md) for module responsibilities and traversal details.

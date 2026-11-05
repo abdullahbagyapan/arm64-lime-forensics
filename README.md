@@ -17,7 +17,7 @@ Clone the repository and enter the toolkit directory:
 
 ```bash
 git clone https://github.com/abdullahbagyapan/arm64-lime-forensics.git
-cd arm64-lime-forensics/arm64-lime
+cd arm64-lime-forensics/src
 ```
 
 No `pip install` step is required.

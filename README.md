@@ -29,7 +29,7 @@ Acquire the target kernel metadata before analyzing its memory dump. The `build_
 Run the acquisition on the target system:
 
 ```bash
-sudo python3 build_profile.py kernel-profile --acquire
+sudo python3 build_profile.py --acquire --all-symbols --all-btf --full-config --vmlinux "/usr/lib/debug/boot/vmlinux-$(uname -r)" kernel_profile/
 ```
 
 Acquisition requires effective UID 0 to access the runtime kernel metadata and artifacts.
